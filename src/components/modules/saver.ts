@@ -84,7 +84,6 @@ export default class Saver extends Module {
       } else {
         console.log(`Block «${tool}» skipped because saved data is invalid`);
         console.groupEnd();
-        return;
       }
 
       /** If it was stub Block, get original data */
