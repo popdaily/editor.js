@@ -6,7 +6,7 @@
  */
 
 import Module from '../__module';
-import _ from '../utils';
+import * as _ from '../utils';
 import Block from '../block';
 
 export default class ModificationsObserver extends Module {
@@ -47,7 +47,9 @@ export default class ModificationsObserver extends Module {
    */
   public destroy() {
     this.mutationDebouncer = null;
-    this.observer.disconnect();
+    if (this.observer) {
+      this.observer.disconnect();
+    }
     this.observer = null;
     this.nativeInputs.forEach((input) => this.Editor.Listeners.off(input, 'input', this.mutationDebouncer));
   }

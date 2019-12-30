@@ -1,9 +1,10 @@
 import Module from '../../__module';
 import $ from '../../dom';
 import {BlockToolConstructable} from '../../../../types';
-import _ from '../../utils';
+import * as _ from '../../utils';
 import {SavedData} from '../../../types-internal/block-data';
 import Block from '../../block';
+import Flipper from '../../flipper';
 
 /**
  * Block Converter
@@ -17,7 +18,10 @@ export default class ConversionToolbar extends Module {
       conversionToolbarWrapper: 'ce-conversion-toolbar',
       conversionToolbarShowed: 'ce-conversion-toolbar--showed',
       conversionToolbarTools: 'ce-conversion-toolbar__tools',
+      conversionToolbarLabel: 'ce-conversion-toolbar__label',
       conversionTool: 'ce-conversion-tool',
+      conversionToolHidden: 'ce-conversion-tool--hidden',
+      conversionToolIcon: 'ce-conversion-tool__icon',
 
       conversionToolFocused : 'ce-conversion-tool--focused',
       conversionToolActive : 'ce-conversion-tool--active',
@@ -39,64 +43,63 @@ export default class ConversionToolbar extends Module {
   public opened: boolean = false;
 
   /**
-   * Focused button index
-   * -1 equals no chosen Tool
-   * @type {number}
-   */
-  private focusedButtonIndex: number = -1;
-
-  /**
    * Available tools
    */
   private tools: { [key: string]: HTMLElement } = {};
 
   /**
+   * Instance of class that responses for leafing buttons by arrows/tab
+   * @type {Flipper|null}
+   */
+  private flipper: Flipper = null;
+
+  /**
+   * Callback that fill be fired on open/close and accepts an opening state
+   */
+  private togglingCallback = null;
+
+  /**
    * Create UI of Conversion Toolbar
    */
-  public make(): void {
+  public make(): HTMLElement {
     this.nodes.wrapper = $.make('div', ConversionToolbar.CSS.conversionToolbarWrapper);
     this.nodes.tools = $.make('div', ConversionToolbar.CSS.conversionToolbarTools);
+
+    const label = $.make('div', ConversionToolbar.CSS.conversionToolbarLabel, {
+      textContent: 'Convert to',
+    });
 
     /**
      * Add Tools that has 'import' method
      */
     this.addTools();
 
+    /**
+     * Prepare Flipper to be able to leaf tools by arrows/tab
+     */
+    this.enableFlipper();
+
+    $.append(this.nodes.wrapper, label);
     $.append(this.nodes.wrapper, this.nodes.tools);
-    $.append(this.Editor.UI.nodes.wrapper, this.nodes.wrapper);
+
+    return this.nodes.wrapper;
   }
 
   /**
-   * Try to show Conversion Toolbar near passed Block
-   * @param {Block} block - block to convert
+   * Toggle conversion dropdown visibility
+   * @param {function} [togglingCallback] — callback that will accept opening state
    */
-  public tryToShow(block: Block): void {
-    const hasExportConfig = block.class.conversionConfig && block.class.conversionConfig.export;
-
-    if (!hasExportConfig) {
-      return;
-    }
-
-    const currentToolName = block.name;
-
-    /**
-     * Focus current tool in conversion toolbar
-     */
-    if (this.tools[currentToolName]) {
-      /**
-       * Drop previous active button before moving
-       */
-      if (this.focusedButton && this.focusedButton.classList.contains(ConversionToolbar.CSS.conversionToolActive)) {
-        this.focusedButton.classList.remove(ConversionToolbar.CSS.conversionToolActive);
-      }
-
-      this.tools[currentToolName].classList.add(ConversionToolbar.CSS.conversionToolActive);
-    }
-
-    this.move(block);
-
+  public toggle(togglingCallback?: (openedState: boolean) => void): void {
     if (!this.opened) {
       this.open();
+    } else {
+      this.close();
+    }
+
+    if (typeof togglingCallback === 'function') {
+      this.togglingCallback = togglingCallback;
+
+      this.togglingCallback(this.opened);
     }
   }
 
@@ -104,8 +107,25 @@ export default class ConversionToolbar extends Module {
    * Shows Conversion Toolbar
    */
   public open(): void {
+    this.filterTools();
+
     this.opened = true;
     this.nodes.wrapper.classList.add(ConversionToolbar.CSS.conversionToolbarShowed);
+
+    /**
+     * We use timeout to prevent bubbling Enter keydown on first dropdown item
+     * Conversion flipper will be activated after dropdown will open
+     */
+    setTimeout(() => {
+      this.flipper.activate(Object.values(this.tools).filter((button) => {
+        return !button.classList.contains(ConversionToolbar.CSS.conversionToolHidden);
+      }));
+      this.flipper.focusFirst();
+
+      if (typeof this.togglingCallback === 'function') {
+        this.togglingCallback(true);
+      }
+    }, 50);
   }
 
   /**
@@ -113,43 +133,21 @@ export default class ConversionToolbar extends Module {
    */
   public close(): void {
     this.opened = false;
+    this.flipper.deactivate();
     this.nodes.wrapper.classList.remove(ConversionToolbar.CSS.conversionToolbarShowed);
 
-    this.dropFocusedButton();
-  }
-
-  /**
-   * Leaf tools by Tab
-   * @todo use class with tool iterator
-   */
-  public leaf(direction: string = 'right'): void {
-    const toolsElements = (Array.from(this.nodes.tools.childNodes) as HTMLElement[]);
-    this.focusedButtonIndex = $.leafNodesAndReturnIndex(
-      toolsElements, this.focusedButtonIndex, direction, ConversionToolbar.CSS.conversionToolFocused,
-    );
-  }
-
-  /**
-   * Returns focused tool as HTML element
-   * @return {HTMLElement}
-   */
-  public get focusedButton(): HTMLElement {
-    if (this.focusedButtonIndex === -1) {
-      return null;
+    if (typeof this.togglingCallback === 'function') {
+      this.togglingCallback(false);
     }
-    return (this.nodes.tools.childNodes[this.focusedButtonIndex] as HTMLElement);
   }
 
   /**
-   * Drops focused button
+   * Returns true if it has more than one tool available for convert in
    */
-  public dropFocusedButton() {
-    Object.values(this.tools).forEach( (tool) => {
-      (tool as HTMLElement).classList
-        .remove(ConversionToolbar.CSS.conversionToolActive, ConversionToolbar.CSS.conversionToolFocused);
-    });
+  public hasTools(): boolean {
+    const tools = Object.keys(this.tools); // available tools in array representation
 
-    this.focusedButtonIndex = -1;
+    return !(tools.length === 1 && tools.shift() === this.config.initialBlock);
   }
 
   /**
@@ -166,6 +164,7 @@ export default class ConversionToolbar extends Module {
     const currentBlockClass = this.Editor.BlockManager.currentBlock.class;
     const currentBlockName = this.Editor.BlockManager.currentBlock.name;
     const savedBlock = await this.Editor.BlockManager.currentBlock.save() as SavedData;
+    const { INTERNAL_SETTINGS } = this.Editor.Tools;
     const blockData = savedBlock.data;
 
     /**
@@ -190,7 +189,7 @@ export default class ConversionToolbar extends Module {
      * In both cases returning value must be a string
      */
     let exportData: string = '';
-    const exportProp = currentBlockClass.conversionConfig.export;
+    const exportProp = currentBlockClass[INTERNAL_SETTINGS.CONVERSION_CONFIG].export;
 
     if (typeof exportProp === 'function') {
       exportData = exportProp(blockData);
@@ -216,7 +215,7 @@ export default class ConversionToolbar extends Module {
      * string — the name of data field to import
      */
     let newBlockData = {};
-    const importProp = replacingTool.conversionConfig.import;
+    const importProp = replacingTool[INTERNAL_SETTINGS.CONVERSION_CONFIG].import;
 
     if (typeof importProp === 'function') {
       newBlockData = importProp(cleaned);
@@ -232,26 +231,11 @@ export default class ConversionToolbar extends Module {
     this.Editor.BlockSelection.clearSelection();
 
     this.close();
+    this.Editor.InlineToolbar.close();
 
     _.delay(() => {
       this.Editor.Caret.setToBlock(this.Editor.BlockManager.currentBlock);
     }, 10)();
-  }
-
-  /**
-   * Move Conversion Toolbar to the working Block
-   */
-  private move(block: Block): void {
-    const blockRect = block.pluginsContent.getBoundingClientRect();
-    const wrapperRect = this.Editor.UI.nodes.wrapper.getBoundingClientRect();
-
-    const newCoords = {
-      x: blockRect.left - wrapperRect.left,
-      y: blockRect.top + blockRect.height - wrapperRect.top,
-    };
-
-    this.nodes.wrapper.style.left = Math.floor(newCoords.x) + 'px';
-    this.nodes.wrapper.style.top = Math.floor(newCoords.y) + 'px';
   }
 
   /**
@@ -266,10 +250,10 @@ export default class ConversionToolbar extends Module {
         continue;
       }
 
-      const api = this.Editor.Tools.apiSettings;
+      const internalSettings = this.Editor.Tools.INTERNAL_SETTINGS;
       const toolClass = tools[toolName] as BlockToolConstructable;
-      const toolToolboxSettings = toolClass[api.TOOLBOX];
-      const conversionConfig = toolClass[api.CONVERSION_CONFIG];
+      const toolToolboxSettings = toolClass[internalSettings.TOOLBOX];
+      const conversionConfig = toolClass[internalSettings.CONVERSION_CONFIG];
 
       /**
        * Skip tools that don't pass 'toolbox' property
@@ -285,24 +269,52 @@ export default class ConversionToolbar extends Module {
         continue;
       }
 
-      this.addTool(toolName, toolToolboxSettings.icon);
+      this.addTool(toolName, toolToolboxSettings.icon, toolToolboxSettings.title);
     }
   }
 
   /**
    * Add tool to the Conversion Toolbar
    */
-  private addTool(toolName: string, toolIcon: string): void {
+  private addTool(toolName: string, toolIcon: string, title: string): void {
     const tool = $.make('div', [ ConversionToolbar.CSS.conversionTool ]);
+    const icon = $.make('div', [ ConversionToolbar.CSS.conversionToolIcon ]);
 
     tool.dataset.tool = toolName;
-    tool.innerHTML = toolIcon;
+    icon.innerHTML = toolIcon;
+
+    $.append(tool, icon);
+    $.append(tool, $.text(title || _.capitalize(toolName)));
 
     $.append(this.nodes.tools, tool);
     this.tools[toolName] = tool;
 
     this.Editor.Listeners.on(tool, 'click', async () => {
       await this.replaceWithBlock(toolName);
+    });
+  }
+
+  /**
+   * Hide current Tool and show others
+   */
+  private filterTools(): void {
+    const { currentBlock } = this.Editor.BlockManager;
+
+    /**
+     * Show previously hided
+     */
+    Object.entries(this.tools).forEach(([name, button]) => {
+      button.hidden = false;
+      button.classList.toggle(ConversionToolbar.CSS.conversionToolHidden, name === currentBlock.name);
+    });
+  }
+
+  /**
+   * Prepare Flipper to be able to leaf tools by arrows/tab
+   */
+  private enableFlipper(): void {
+    this.flipper = new Flipper({
+      focusedItemClass: ConversionToolbar.CSS.conversionToolFocused,
     });
   }
 }

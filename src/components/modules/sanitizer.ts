@@ -17,7 +17,7 @@
  */
 
 import Module from '../__module';
-import _ from '../utils';
+import * as _ from '../utils';
 
 /**
  * @typedef {Object} SanitizerConfig
@@ -146,7 +146,7 @@ export default class Sanitizer extends Module {
       return this.configCache[toolName];
     }
 
-    const sanitizeGetter = this.Editor.Tools.apiSettings.SANITIZE_CONFIG;
+    const sanitizeGetter = this.Editor.Tools.INTERNAL_SETTINGS.SANITIZE_CONFIG;
     const toolClass = this.Editor.Tools.available[toolName];
     const baseConfig = this.getInlineToolsConfig(toolName);
 
@@ -199,7 +199,7 @@ export default class Sanitizer extends Module {
       (enableInlineTools as string[]).map( (inlineToolName) => {
         config = Object.assign(
           config,
-          Tools.inline[inlineToolName][Tools.apiSettings.SANITIZE_CONFIG],
+          Tools.inline[inlineToolName][Tools.INTERNAL_SETTINGS.SANITIZE_CONFIG],
         ) as SanitizerConfig;
       });
     }
@@ -221,7 +221,7 @@ export default class Sanitizer extends Module {
 
     Object.entries(Tools.inline)
       .forEach( ([name, inlineTool]: [string, InlineToolConstructable]) => {
-        Object.assign(config, inlineTool[Tools.apiSettings.SANITIZE_CONFIG]);
+        Object.assign(config, inlineTool[Tools.INTERNAL_SETTINGS.SANITIZE_CONFIG]);
       });
 
     this.inlineToolsConfigCache = config;
